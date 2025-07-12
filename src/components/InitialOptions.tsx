@@ -141,41 +141,7 @@ export default function InitialOptions({ onImportImage, onGenerateImage, onLogou
         </div>
       </div>
 
-      {/* Features Section */}
-      <div style={{ 
-        backgroundColor: "#f8f9fa", 
-        borderRadius: 12, 
-        padding: 24,
-        marginBottom: 32
-      }}>
-        <h4 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, textAlign: "center" }}>
-          What you can do next:
-        </h4>
-        <div style={{ 
-          display: "grid", 
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", 
-          gap: 16,
-          fontSize: 14,
-          color: "#666"
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span>📝</span>
-            <span>View generated JSON description</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span>✏️</span>
-            <span>Edit JSON directly</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span>🤖</span>
-            <span>Ask AI to modify the image</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span>🔄</span>
-            <span>Generate new images from JSON</span>
-          </div>
-        </div>
-      </div>
+    
 
       {/* Remove API Key button - only show if user has an API key and client is ready */}
       {isClient && hasApiKey && (

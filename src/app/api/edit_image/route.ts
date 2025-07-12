@@ -44,7 +44,6 @@ export async function POST(req: NextRequest) {
     });
     
     // Create a comprehensive prompt directly from the JSON structure
-    // const prompt = createPromptFromJson(parsedJson);
     const prompt = "Make edits to this image. Here is a JSON representation of the new image with the edits. Make sure to follow the JSON description exactly. \n " + JSON.stringify(parsedJson, null, 2);
     console.log('Generated prompt:', prompt);
     
@@ -118,50 +117,3 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Helper function to create a comprehensive prompt from JSON structure
-function createPromptFromJson(json: Record<string, unknown>): string {
-  const parts: string[] = [];
-  
-  // Extract key visual elements directly from JSON structure
-  const description = json.description as Record<string, unknown> | undefined;
-  if (description?.content && typeof description.content === 'string') {
-    parts.push(description.content);
-  }
-  
-  if (description?.style && typeof description.style === 'string') {
-    parts.push(`in ${description.style} style`);
-  }
-  
-  if (json.elements && Array.isArray(json.elements) && json.elements.length > 0) {
-    parts.push(`featuring ${json.elements.join(', ')}`);
-  }
-  
-  if (json.colors && Array.isArray(json.colors) && json.colors.length > 0) {
-    parts.push(`with ${json.colors.join(', ')} colors`);
-  }
-  
-  if (json.mood && typeof json.mood === 'string') {
-    parts.push(`${json.mood} mood`);
-  }
-  
-  if (json.composition && typeof json.composition === 'string') {
-    parts.push(`${json.composition} composition`);
-  }
-  
-  if (description?.quality && typeof description.quality === 'string') {
-    parts.push(`${description.quality}`);
-  }
-  
-  // Add any specific properties
-  const imageProperties = json.image_properties as Record<string, unknown> | undefined;
-  if (imageProperties?.dimensions && typeof imageProperties.dimensions === 'string') {
-    parts.push(`${imageProperties.dimensions} resolution`);
-  }
-  
-  // Fallback if no recognizable structure
-  if (parts.length === 0) {
-    return JSON.stringify(json);
-  }
-  
-  return parts.join(', ');
-} 
