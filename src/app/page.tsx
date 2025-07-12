@@ -12,6 +12,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [pendingAction, setPendingAction] = useState<"import" | "generate" | null>(null);
+  const [apiKeyVersion, setApiKeyVersion] = useState(0); // Force re-render when API key changes
   
   // Image and JSON state for passing to editor
   const [currentImage, setCurrentImage] = useState<string | undefined>(undefined);
@@ -24,21 +25,33 @@ export default function Home() {
   const [streamingJsonText, setStreamingJsonText] = useState<string>("");
 
   const checkApiKey = (): boolean => {
-    const apiKey = localStorage.getItem('openai_api_key');
-    return !!apiKey;
+    if (typeof window === 'undefined') return false;
+    try {
+      const apiKey = localStorage.getItem('openai_api_key');
+      return !!apiKey;
+    } catch (error) {
+      console.error('Error accessing localStorage:', error);
+      return false;
+    }
   };
 
   const handleApiKeySubmit = (apiKey: string) => {
-    localStorage.setItem('openai_api_key', apiKey);
-    setShowApiKeyModal(false);
-    
-    // Execute the pending action
-    if (pendingAction === "import") {
-      setStep("import");
-    } else if (pendingAction === "generate") {
-      handleGenerateImageDirect();
+    try {
+      localStorage.setItem('openai_api_key', apiKey);
+      setShowApiKeyModal(false);
+      setApiKeyVersion(prev => prev + 1); // Force re-render
+      
+      // Execute the pending action
+      if (pendingAction === "import") {
+        setStep("import");
+      } else if (pendingAction === "generate") {
+        handleGenerateImageDirect();
+      }
+      setPendingAction(null);
+    } catch (error) {
+      console.error('Error saving API key:', error);
+      alert('Failed to save API key. Please try again.');
     }
-    setPendingAction(null);
   };
 
   const handleApiKeyModalClose = () => {
@@ -47,10 +60,17 @@ export default function Home() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('openai_api_key');
-    setCurrentImage(undefined);
-    setCurrentJson(undefined);
-    setStep("options");
+    try {
+      localStorage.removeItem('openai_api_key');
+      setCurrentImage(undefined);
+      setCurrentJson(undefined);
+      setStep("options");
+      // Force re-render to update the InitialOptions component
+      setApiKeyVersion(prev => prev + 1);
+    } catch (error) {
+      console.error('Error removing API key:', error);
+      alert('Failed to remove API key. Please try again.');
+    }
   };
 
   const handleImportImage = () => {
@@ -85,17 +105,25 @@ export default function Home() {
     setCurrentImage(imageData);
     setImageSource("imported");
     setStep("editor");
-    setLoading(false);
     
-    // Start streaming JSON analysis
-    setIsStreamingJson(true);
+    // Start JSON analysis (no longer streaming)
+    setIsStreamingJson(false);
     setStreamingJsonText("");
     setCurrentJson(undefined);
 
     try {
+      // Get API key from localStorage
+      const apiKey = localStorage.getItem('openai_api_key');
+      if (!apiKey) {
+        throw new Error('No API key found');
+      }
+
       const response = await fetch("/api/analyze_image", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
         body: JSON.stringify({ imageData, filename }),
       });
 
@@ -103,49 +131,17 @@ export default function Home() {
         throw new Error('Failed to analyze image');
       }
 
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) {
-        throw new Error('No response body');
+      const data = await response.json();
+      
+      if (data.json) {
+        setCurrentJson(data.json);
       }
-
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        
-        // Process complete messages
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              
-              if (data.type === 'chunk') {
-                setStreamingJsonText(data.accumulated);
-              } else if (data.type === 'complete' && data.json) {
-                setCurrentJson(data.json);
-                setIsStreamingJson(false);
-                setStreamingJsonText("");
-              }
-            } catch (parseError) {
-              console.error('Error parsing SSE data:', parseError);
-            }
-          }
-        }
-      }
+      
     } catch (error) {
       console.error("Error analyzing image:", error);
-      setIsStreamingJson(false);
-      setStreamingJsonText("");
       alert("Failed to analyze image. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -167,6 +163,7 @@ export default function Home() {
           onImportImage={handleImportImage}
           onGenerateImage={handleGenerateImage}
           onLogout={handleLogout}
+          key={apiKeyVersion} // Force re-render when API key changes
         />
         <ApiKeyModal
           isOpen={showApiKeyModal}

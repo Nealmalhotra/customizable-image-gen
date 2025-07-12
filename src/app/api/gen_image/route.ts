@@ -1,141 +1,126 @@
 import { NextRequest, NextResponse } from "next/server";
-import { experimental_generateImage as generateImage } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import OpenAI from 'openai';
+import { Buffer } from 'node:buffer';
+
+
 
 export async function POST(req: NextRequest) {
-  const { prompt, dimensions, aspectRatio } = await req.json();
+  const { prompt, dimensions, aspectRatio, stream = false } = await req.json();
   
-  // Generate the image first
-  const { image } = await generateImage({
-    model: openai.image('gpt-image-1'),
-    prompt: prompt,
-    size: dimensions,
-    aspectRatio: aspectRatio,
-  });
+  // Get API key from Authorization header
+  const authHeader = req.headers.get('authorization');
+  const apiKey = authHeader?.replace('Bearer ', '');
   
-  console.log("Generated image for prompt:", prompt);
-  console.log("Image object keys:", Object.keys(image));
-  console.log("Image object structure:", JSON.stringify(image, null, 2));
-
-  // Convert image to base64 data URL for analysis
-  
-  const imageDataUrl = `data:${image.mimeType || 'image/png'};base64,${image.base64}`;
+  if (!apiKey) {
+    return NextResponse.json({ error: 'API key is required in Authorization header' }, { status: 401 });
+  }
   
   try {
-    // Analyze the image using the analyze_image endpoint
-    const analyzeResponse = await fetch(`${process.env.NEXT_PUBLIC_URL || 'http://localhost:3000'}/api/analyze_image`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        imageData: imageDataUrl,
-        filename: `generated-${Date.now()}.png`
-      })
+    // Create OpenAI client with user-provided API key
+    const openai = new OpenAI({
+      apiKey: apiKey,
     });
     
-    if (!analyzeResponse.ok) {
-      throw new Error('Failed to analyze generated image');
+    if (stream) {
+      // For now, fall back to non-streaming mode since OpenAI Responses API may not be available
+      // TODO: Implement proper streaming when OpenAI Responses API is stable
+      console.log('Streaming requested but falling back to non-streaming mode');
     }
     
-    // Consume the streaming response
-    const reader = analyzeResponse.body?.getReader();
-    const decoder = new TextDecoder();
-    
-    if (!reader) {
-      throw new Error('No response body from analyze_image');
-    }
-    
-    let buffer = '';
-    let jsonDescription = null;
-    
-    while (true) {
-      const { done, value } = await reader.read();
+    // Generate image using standard OpenAI API
+    const imageResponse = await openai.images.generate({
+        model: "gpt-image-1",
+        prompt: prompt,
+        n: 1,
+        size: dimensions
+      });
       
-      if (done) break;
+      const imageData = imageResponse.data?.[0];
       
-      buffer += decoder.decode(value, { stream: true });
-      
-      // Process complete messages
-      const lines = buffer.split('\n\n');
-      buffer = lines.pop() || ''; // Keep incomplete line in buffer
-      
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            
-            if (data.type === 'complete' && data.json) {
-              jsonDescription = data.json;
-            }
-          } catch (parseError) {
-            console.error('Error parsing SSE data:', parseError);
-          }
-        }
+      if (!imageData || (!imageData.b64_json && !imageData.url)) {
+        console.error('No image data received:', imageData);
+        throw new Error('No image data received from OpenAI');
       }
-    }
-    
-    // Add generation-specific metadata to the JSON
-    const finalJsonDescription = jsonDescription ? {
-      ...jsonDescription,
-      source: "generated",
-      prompt_used: prompt,
-      image_properties: {
-        ...jsonDescription.image_properties,
-        dimensions: dimensions,
-        aspect_ratio: aspectRatio,
-        format: "PNG",
-        generated_at: new Date().toISOString()
-      }
-    } : null;
-    
-    // Ensure image object has the right structure for the client
-    const imageResponse = {
-      base64: image.base64,
-      mimeType: image.mimeType || 'image/png'
-    };
-    
-    console.log("Final image response structure:", Object.keys(imageResponse));
 
-    return NextResponse.json({ 
-      image: imageResponse, 
-      json: finalJsonDescription
-    });
+      // If only URL is returned (edge-case), fetch it and convert to base64 so the rest of the pipeline stays the same
+      let base64Image: string | undefined = imageData.b64_json;
+      if (!base64Image && imageData.url) {
+        const imgRes = await fetch(imageData.url);
+        const arrayBuffer = await imgRes.arrayBuffer();
+        base64Image = Buffer.from(arrayBuffer).toString('base64');
+      }
+
+      if (!base64Image) {
+        throw new Error('Failed to obtain base64 image data');
+      }
+
+      // Use the analyze_image endpoint to analyze the generated image
+      const analyzeResponse = await fetch(new URL('/api/analyze_image', req.url).toString(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          imageData: `data:image/png;base64,${base64Image}`,
+          filename: `generated_${Date.now()}.png`
+        })
+      });
+
+      let jsonDescription;
+      if (analyzeResponse.ok) {
+        const analyzeResult = await analyzeResponse.json();
+        jsonDescription = analyzeResult.json;
+        
+        // Update the analysis to reflect it's a generated image
+        if (jsonDescription) {
+          jsonDescription.source = "generated";
+          jsonDescription.prompt_used = prompt;
+          jsonDescription.image_properties = {
+            ...jsonDescription.image_properties,
+            dimensions: dimensions,
+            aspect_ratio: aspectRatio,
+            format: "PNG",
+            generated_at: new Date().toISOString()
+          };
+        }
+      } else {
+        // Fallback JSON if analysis fails
+        jsonDescription = {
+          "analysis": "AI Generated Image",
+          "source": "generated",
+          "prompt_used": prompt,
+          "image_properties": {
+            "dimensions": dimensions,
+            "aspect_ratio": aspectRatio,
+            "format": "PNG",
+            "generated_at": new Date().toISOString()
+          },
+          "description": {
+            "style": "AI-generated digital art",
+            "content": `Generated from prompt: ${prompt}`,
+            "quality": "High resolution"
+          },
+          "elements": ["AI", "generated", "content"],
+          "mood": "Creative",
+          "colors": ["varied"],
+          "composition": "AI-generated composition"
+        };
+      }
+      
+      return NextResponse.json({ 
+        image: {
+          base64: base64Image,
+          mimeType: 'image/png'
+        },
+        json: jsonDescription
+      });
     
   } catch (error) {
-    console.error('Error analyzing generated image:', error);
-    
-    // Fallback JSON if analysis fails
-    const fallbackJson = {
-      "analysis": "AI Generated Image",
-      "source": "generated",
-      "prompt_used": prompt,
-      "image_properties": {
-        "dimensions": dimensions,
-        "aspect_ratio": aspectRatio,
-        "format": "PNG",
-        "generated_at": new Date().toISOString()
-      },
-      "description": {
-        "style": "AI-generated digital art",
-        "content": `Generated from prompt: ${prompt}`,
-        "quality": "High resolution"
-      },
-      "elements": ["AI", "generated", "content"],
-      "mood": "Creative",
-      "colors": ["varied"]
-    };
-    
-    console.log("Returning fallback response with image keys:", Object.keys(image));
-    
-    const fallbackImageResponse = {
-      base64: image.base64,
-      mimeType: image.mimeType || 'image/png'
-    };
-    
-    return NextResponse.json({ 
-      image: fallbackImageResponse, 
-      json: fallbackJson
-    });
+    console.error('Error generating image:', error);
+    return NextResponse.json(
+      { error: 'Failed to generate image' }, 
+      { status: 500 }
+    );
   }
 }

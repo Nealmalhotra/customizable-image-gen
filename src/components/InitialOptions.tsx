@@ -14,8 +14,29 @@ export default function InitialOptions({ onImportImage, onGenerateImage, onLogou
 
   useEffect(() => {
     setIsClient(true);
-    const apiKey = localStorage.getItem('openai_api_key');
-    setHasApiKey(!!apiKey);
+    try {
+      const apiKey = localStorage.getItem('openai_api_key');
+      setHasApiKey(!!apiKey);
+    } catch (error) {
+      console.error('Error accessing localStorage:', error);
+      setHasApiKey(false);
+    }
+  }, []);
+
+  // Listen for storage changes to update the API key state
+  useEffect(() => {
+    const handleStorageChange = () => {
+      try {
+        const apiKey = localStorage.getItem('openai_api_key');
+        setHasApiKey(!!apiKey);
+      } catch (error) {
+        console.error('Error accessing localStorage:', error);
+        setHasApiKey(false);
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   return (
@@ -156,7 +177,7 @@ export default function InitialOptions({ onImportImage, onGenerateImage, onLogou
         </div>
       </div>
 
-      {/* Change API Key button - only show if user has an API key and client is ready */}
+      {/* Remove API Key button - only show if user has an API key and client is ready */}
       {isClient && hasApiKey && (
         <div style={{ textAlign: "center" }}>
           <Button 
@@ -164,7 +185,7 @@ export default function InitialOptions({ onImportImage, onGenerateImage, onLogou
             onClick={onLogout}
             style={{ fontSize: 14 }}
           >
-            Change API Key
+            Remove API Key
           </Button>
         </div>
       )}
